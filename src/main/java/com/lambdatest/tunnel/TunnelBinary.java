@@ -116,9 +116,8 @@ class TunnelBinary {
                 stdout += line;
             }
             process.waitFor();
+            return true;
 
-            boolean validBinary = Pattern.matches("\\d+\\.\\d+\\.\\d+\\d+\\-+\\w+\\d", stdout);
-            return validBinary;
         }catch(IOException ex){
             throw new TunnelException(ex.toString());
         }
