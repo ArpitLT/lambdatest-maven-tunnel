@@ -1,4 +1,4 @@
-## LambdaTest-Maven-Tunnel
+# LambdaTest Maven Tunnel
 ![LambdaTest Logo](https://www.lambdatest.com/static/images/logo.svg)
 
 ---
