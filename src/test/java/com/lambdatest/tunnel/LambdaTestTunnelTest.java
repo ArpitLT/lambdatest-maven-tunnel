@@ -38,6 +38,7 @@ public class LambdaTestTunnelTest {
 		assertTrue(t.command.contains("-key"));
 		assertTrue(t.command.contains(System.getenv("LT_ACCESS_KEY")));
 		Tunnel t2 = new Tunnel();
+		options.put("infoAPIPort","5010");
 		t2.start(options);
 		assertTrue(t2.command.contains("-user"));
 		assertTrue(t2.command.contains(System.getenv("LT_USERNAME")));

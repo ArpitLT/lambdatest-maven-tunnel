@@ -2,6 +2,7 @@ package com.lambdatest.tunnel;
 
 import java.io.*;
 import java.net.HttpURLConnection;
+import java.net.ServerSocket;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -12,14 +13,16 @@ import java.util.*;
  */
 public class Tunnel {
 
-    private static final List<String> IGNORE_KEYS = Arrays.asList("user", "key", "binarypath");
+    private static final List<String> IGNORE_KEYS = Arrays.asList("user", "key", "infoAPIPort", "binarypath");
 
     List<String> command;
     private Map<String, String> startOptions;
     private String binaryPath;
-    static String line18;
     private int stackCount=0;
-    private LineNumberReader lineNumberReader;
+    private boolean isOSWindows;
+    private boolean tunnelFlag=true;
+    private static int infoAPIPortValue=0;
+
     static Queue<String> Q = new LinkedList<String>();
 
     private TunnelProcess proc = null;
@@ -73,61 +76,44 @@ public class Tunnel {
     public void start(Map<String, String> options) throws Exception {
         startOptions = options;
         //Get path of downloaded tunnel in project directory
-        TunnelBinary lb = new TunnelBinary();
-        binaryPath = lb.getBinaryPath();
+        TunnelBinary tunnelBinary = new TunnelBinary();
+        binaryPath = tunnelBinary.getBinaryPath();
+        if(!options.containsKey("infoAPIPort"))
+            infoAPIPortValue = findAvailablePort();
+        else
+            infoAPIPortValue = Integer.parseInt(options.get("infoAPIPort"));
+
+        clearTheFile();
         passParametersToTunnel(startOptions, "start");
 
-            proc = runCommand(command);
-            BufferedReader stdoutbr = new BufferedReader(new InputStreamReader(proc.getInputStream()));
-            BufferedReader stderrbr = new BufferedReader(new InputStreamReader(proc.getErrorStream()));
-            String stdout="";
-            String stderr="";
-            String line;
+        proc = runCommand(command);
+        verifyTunnelStarted();
+        BufferedReader stdoutbr = new BufferedReader(new InputStreamReader(proc.getInputStream()));
+        BufferedReader stderrbr = new BufferedReader(new InputStreamReader(proc.getErrorStream()));
 
-            clearTheFile();
-            while ((line = stdoutbr.readLine()) != null) {
-
-                File newFile = new File("tunnelId.log");
-
-                BufferedWriter writer = new BufferedWriter(
-                        new FileWriter(newFile, true)  //Set true for append mode
-                );
-                writer.newLine();   //Add new line
-                writer.write(line);
-
-                writer.close();
-
-                stdout += line;
-            }
-
-            while ((line = stderrbr.readLine()) != null) {
-                stderr += line;
-            }
-
-            /* Finding Tunnel id from file */
-            BufferedReader br = new BufferedReader(new FileReader("tunnelId.log"));
-            lineNumberReader = new LineNumberReader(br);
-            String string;
-            int lineCount=0;
-            while((string = br.readLine()) != null) {
-                lineCount++;
-                int posFound = string.indexOf("Tunnel ID");
-                if (posFound > - 1) {
-                    break;
+        //capture infoAPIPort of running tunnel and store in queue
+        Q.add(String.valueOf(infoAPIPortValue));
+    }
+    public void verifyTunnelStarted() {
+        try {
+            List<String> lines = Files.readAllLines(Paths.get("tunnel.log"));
+            for (String line : lines) {
+                if (line.contains("Err: Unable to authenticate user")) {
+                    tunnelFlag = false;
+                    throw new TunnelException("Invalid Username/Access key");
                 }
             }
-
-
-            line18 = Files.readAllLines(Paths.get("tunnelId.log")).get(lineCount-1);
-            line18 = line18.substring(line18.lastIndexOf(":")+1,line18.lastIndexOf('"'));
-
-            //capture tunnelid of running tunnel and store in queue
-            Q.add(line18);
-
-
+            if(tunnelFlag)
+                System.out.println("Tunnel Started Successfully");
+        } catch (IOException | TunnelException e) {
+            e.printStackTrace();
+        }
     }
 
     public void stop() throws Exception {
+        //Return the control if the tunnel is not even started
+        if(!tunnelFlag)
+            return;
         stackCount = Q.size();
 
         while(stackCount!=0) {
@@ -138,37 +124,50 @@ public class Tunnel {
         passParametersToTunnel(startOptions, "stop");
         proc.waitFor();
     }
+    private static Integer findAvailablePort() throws IOException {
+        ServerSocket s = new ServerSocket(0);
+        s.close();
+        return s.getLocalPort();
+    }
     public static void clearTheFile() throws IOException {
-        FileWriter fwOb = new FileWriter("tunnelId.log", false);
+        FileWriter fwOb = new FileWriter("tunnel.log", false);
         PrintWriter pwOb = new PrintWriter(fwOb, false);
         pwOb.flush();
         pwOb.close();
         fwOb.close();
     }
-    public static void stopTunnel() throws IOException{
+    public static void stopTunnel() throws IOException, TunnelException {
         String username = System.getenv("LT_USERNAME");
         String accessKey = System.getenv("LT_ACCESS_KEY");
         String Authentication= username+":"+accessKey;
         String basicsAuthload= "Basic "+ Base64.getEncoder().encodeToString(Authentication.getBytes());
-        URL urlForDeleteRequest = new URL("https://api.lambdatest.com/automation/api/v1/tunnels/"+Q.poll());
+        URL urlForDeleteRequest = new URL("http://127.0.0.1:"+Q.poll()+"/api/v1.0/stop");
         HttpURLConnection connection=(HttpURLConnection) urlForDeleteRequest.openConnection();
         connection.setRequestMethod("DELETE");
         connection.setRequestProperty("Authorization", basicsAuthload);
         connection.connect();
         InputStream inputStream = connection.getInputStream();
-        int responseCode = connection.getResponseCode();
-
-
+        if(connection.getResponseCode()==200) {
+            System.out.println("Tunnel Closed Successfully");
+        }
+        else
+            throw new TunnelException("Unable to Close Tunnel");
     }
 
     // Give parameters to the tunnel for starting it in runCommand.
-    private void passParametersToTunnel(Map<String, String> options, String opCode) {
+    private void passParametersToTunnel(Map<String, String> options, String opCode) throws IOException {
         command = new ArrayList<String>();
         command.add(binaryPath);
         command.add("-user");
         command.add(options.get("user"));
         command.add("-key");
         command.add(options.get("key"));
+        command.add("-infoAPIPort");
+        command.add(String.valueOf(infoAPIPortValue));
+
+        if(options.get("user")==null ||  options.get("key")==null) {
+            throw new TunnelException("Username/Access key cannot be empty");
+        }
 
         for (Map.Entry<String, String> opt : options.entrySet()) {
             String parameter = opt.getKey().trim();
@@ -191,7 +190,28 @@ public class Tunnel {
     protected TunnelProcess runCommand(List<String> command) throws IOException, InterruptedException {
         ProcessBuilder processBuilder = new ProcessBuilder(command);
         final Process process = processBuilder.start();
-        Thread.sleep(5000);
+        //Check if Tunnel Cache is successfully created
+        String ltcbin = System.getProperty("user.dir")+ "/ltcbin";
+
+        String osname = System.getProperty("os.name").toLowerCase();
+        isOSWindows = osname.contains("windows");
+        if (isOSWindows) {
+            ltcbin += ".exe";
+        }
+
+        File fileExist = new File(ltcbin);
+        if(fileExist.exists())
+        {
+            System.out.println("Found Cached Tunnel Component");
+            Thread.sleep(5000);
+        }
+        else {
+            System.out.println("Creating Cached Tunnel Component");
+        }
+        while(!fileExist.renameTo(fileExist)) {
+            // To wait until ltcbin cache is fully created.
+            Thread.sleep(3000);
+        }
         process.destroy();
 
         return new TunnelProcess() {

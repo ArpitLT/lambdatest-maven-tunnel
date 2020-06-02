@@ -25,8 +25,8 @@ class TunnelBinary {
     private boolean isOSWindows;
 
     private final String orderedPaths[] = {
+            System.getProperty("user.dir") + "/.lambdatest",
             System.getProperty("user.home") + "/.lambdatest",
-            System.getProperty("user.dir"),
             System.getProperty("java.io.tmpdir")
     };
 
@@ -99,10 +99,13 @@ class TunnelBinary {
         Process process;
         String url = httpPath;
         try {
-            downloadZipFile(url, store+downloadFileName);
+            File tunnelZip = new File(store+downloadFileName);
+            if(!tunnelZip.exists())
+                downloadZipFile(url, store+downloadFileName);
         } catch (IOException e) {
             e.printStackTrace();
-        }
+        }        
+        System.out.println("Extracting the Zipped Tunnel");
         unzip(destParentDir+downloadFileName, destParentDir);
         try {
             changePermissions(binaryPath);
@@ -144,7 +147,11 @@ class TunnelBinary {
         }
 
         if (!new File(binaryPath).exists()) {
+            System.out.println("Downloading Fresh Tunnel Binary");
             downloadBinary(destParentDir);
+        }
+        else {
+            System.out.println("Found Existing Tunnel Binary");
         }
     }
 
